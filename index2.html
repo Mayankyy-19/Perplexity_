@@ -1,0 +1,1563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perplexity Explorer</title>
+
+<!-- Fonts: Unbounded for big titles, Manrope for text, JetBrains Mono for tokens and numbers -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* =====================================================================
+   1. COLOURS AND SHARED VALUES (dark theme)
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --bg: #04050b;                         /* almost black, slightly blue */
+  --panel: rgba(14, 16, 34, .72);        /* glassy cards */
+  --panel-solid: #0d0f1f;
+  --line: rgba(255, 255, 255, .09);
+  --line-2: rgba(255, 255, 255, .05);
+  --ink: #eef0ff;                        /* main text */
+  --ink-2: #b4b8d8;
+  --mute: #7a7ea6;
+  --indigo: #6366f1;                     /* buttons */
+  --violet: #a78bfa;
+  --cyan: #38bdf8;                       /* low surprise */
+  --pink: #f472b6;                       /* high surprise */
+  --sim: #fbbf24;                        /* "simulated" label */
+  --error: #ff6b81;
+  --ok: #34d399;
+
+  --display: "Unbounded", "Segoe UI", system-ui, sans-serif;
+  --sans: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; min-width: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 86px; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 17px/1.6 var(--sans);
+  overflow-x: clip;
+  -webkit-font-smoothing: antialiased;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .45; }
+:focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; border-radius: 8px; }
+[hidden] { display: none !important; }
+
+/* =====================================================================
+   2. MOVING BACKGROUND (stars + glowing clouds that follow your cursor)
+   ===================================================================== */
+#space { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -2; display: block; }
+.glow {
+  position: fixed; z-index: -1; border-radius: 50%; filter: blur(90px); pointer-events: none;
+  transition: transform .9s cubic-bezier(.2, .8, .2, 1);
+}
+.glow.a { width: 620px; height: 620px; left: -160px; top: -200px; background: rgba(99, 102, 241, .22); }
+.glow.b { width: 560px; height: 560px; right: -180px; top: 260px; background: rgba(244, 114, 182, .12); }
+.glow.c { width: 520px; height: 520px; left: 30%; top: 900px; background: rgba(56, 189, 248, .10); }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
+
+/* =====================================================================
+   3. TOP BAR
+   ===================================================================== */
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  background: rgba(4, 5, 11, .62);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--line-2);
+}
+.topbar .wrap { height: 66px; display: flex; align-items: center; gap: 24px; }
+.logo { display: flex; align-items: center; gap: 11px; color: var(--ink); text-decoration: none; font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: -.01em; }
+.nav { display: flex; gap: 2px; margin-left: auto; }
+.nav a { color: var(--ink-2); text-decoration: none; font-size: 15px; padding: 7px 13px; border-radius: 10px; }
+.nav a:hover { color: var(--ink); background: rgba(255, 255, 255, .06); }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255, 255, 255, .03); font-size: 14px; color: var(--ink-2); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mute); flex: none; }
+.loading .dot, .working .dot { background: var(--violet); box-shadow: 0 0 10px var(--violet); animation: blink 1s infinite; }
+.ready .dot { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+.error .dot { background: var(--error); box-shadow: 0 0 10px var(--error); }
+@keyframes blink { 50% { opacity: .3; } }
+
+/* =====================================================================
+   4. HERO: input + 3D terrain graph
+   ===================================================================== */
+.hero { padding: 64px 0 20px; }
+.hero-copy { transition: transform .8s cubic-bezier(.2, .8, .2, 1); }
+.hero h1 {
+  margin: 0; font-family: var(--display); font-weight: 700;
+  font-size: clamp(40px, 6.2vw, 80px); line-height: 1; letter-spacing: -.04em;
+  text-wrap: balance;
+}
+.hero .sub { margin: 20px 0 0; max-width: 36em; color: var(--ink-2); font-size: 19px; }
+
+.ask { margin-top: 36px; display: flex; gap: 12px; max-width: 900px; }
+.field {
+  flex: 1; display: flex; align-items: center; padding: 0 22px;
+  background: rgba(255, 255, 255, .04); border: 1px solid var(--line); border-radius: 18px;
+  transition: border-color .2s, background .2s, box-shadow .2s;
+}
+.field:focus-within { border-color: rgba(167, 139, 250, .7); background: rgba(255, 255, 255, .06); box-shadow: 0 0 0 6px rgba(99, 102, 241, .14); }
+#sentence { width: 100%; border: 0; outline: 0; background: transparent; font-size: clamp(20px, 2.4vw, 26px); font-weight: 600; padding: 17px 0; letter-spacing: -.01em; }
+.btn {
+  border: 0; border-radius: 18px; padding: 0 28px; background: var(--indigo); color: #fff; font-weight: 700; font-size: 17px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px; white-space: nowrap;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .12) inset, 0 10px 40px -8px rgba(99, 102, 241, .8);
+  transition: background .2s, transform .15s, box-shadow .2s;
+}
+.btn:hover:not(:disabled) { background: #7577ff; box-shadow: 0 0 0 1px rgba(255, 255, 255, .18) inset, 0 12px 50px -6px rgba(124, 116, 255, .95); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.spin { width: 16px; height: 16px; border-radius: 50%; border: 2.5px solid rgba(255, 255, 255, .35); border-top-color: #fff; animation: rot .7s linear infinite; display: none; }
+.is-busy .spin { display: inline-block; }
+@keyframes rot { to { transform: rotate(360deg); } }
+
+.samples { margin-top: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.samples span { color: var(--mute); font-size: 15px; margin-right: 2px; }
+.chip {
+  border: 1px solid var(--line); background: rgba(255, 255, 255, .03); border-radius: 999px; padding: 8px 16px;
+  font-size: 15px; color: var(--ink-2); transition: border-color .2s, color .2s, background .2s;
+}
+.chip:hover:not(:disabled) { border-color: rgba(167, 139, 250, .6); color: var(--ink); background: rgba(99, 102, 241, .14); }
+
+.status-row { margin-top: 22px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; min-height: 26px; }
+.status { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 15px; }
+.status.error { color: var(--error); }
+.bar { width: 260px; height: 5px; border-radius: 9px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), var(--violet), var(--pink)); transition: width .25s; }
+
+.msg { margin-top: 18px; max-width: 900px; padding: 15px 20px; border-radius: 14px; font-size: 15.5px; }
+.msg.error { background: rgba(255, 77, 109, .1); border: 1px solid rgba(255, 107, 129, .35); color: #ffc2cc; }
+.msg.error strong { color: var(--error); display: block; margin-bottom: 2px; }
+.msg.error code { font-family: var(--mono); font-size: 13px; word-break: break-word; color: #ff9fb0; }
+.msg.note { background: rgba(251, 191, 36, .08); border: 1px solid rgba(251, 191, 36, .3); color: #fde4a0; }
+
+/* The 3D terrain stage */
+.stage {
+  position: relative; height: clamp(360px, 52vw, 560px); margin-top: 30px;
+  border-radius: 28px; overflow: hidden; border: 1px solid var(--line);
+  background:
+    radial-gradient(120% 80% at 50% 100%, rgba(99, 102, 241, .16), transparent 60%),
+    linear-gradient(180deg, rgba(13, 15, 31, .55), rgba(6, 7, 16, .85));
+}
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stage-hint {
+  position: absolute; left: 0; right: 0; top: 28px; text-align: center; color: var(--ink-2); font-size: 16px; pointer-events: none; padding: 0 20px;
+}
+.stage-key {
+  position: absolute; left: 24px; bottom: 20px; display: flex; gap: 12px; align-items: center; font-size: 13.5px; color: var(--ink-2); pointer-events: none;
+}
+.ramp { width: 120px; height: 7px; border-radius: 9px; background: linear-gradient(90deg, var(--cyan), var(--violet), var(--pink)); }
+.stage-move { position: absolute; right: 24px; bottom: 20px; font-size: 13.5px; color: var(--mute); pointer-events: none; }
+.tip {
+  position: absolute; z-index: 4; pointer-events: none; transform: translate(-50%, calc(-100% - 16px));
+  background: rgba(8, 9, 20, .92); border: 1px solid var(--line); color: var(--ink); border-radius: 10px;
+  padding: 8px 12px; font: 13px var(--mono); white-space: nowrap; box-shadow: 0 10px 30px -10px #000;
+}
+
+/* =====================================================================
+   5. SECTIONS
+   ===================================================================== */
+main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 30px; padding: 30px 0 90px; }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 26px; padding: 46px 52px;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+.head { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 32px; }
+.head h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: clamp(24px, 2.8vw, 32px); line-height: 1.1; letter-spacing: -.03em; text-wrap: balance; }
+.head p { margin: 10px 0 0; color: var(--ink-2); max-width: 38em; }
+.tag { margin-left: auto; flex: none; font-size: 13.5px; font-weight: 700; padding: 6px 12px; border-radius: 999px; white-space: nowrap; }
+.tag.real { color: var(--ok); background: rgba(52, 211, 153, .1); border: 1px solid rgba(52, 211, 153, .25); }
+.tag.sim { color: var(--sim); background: rgba(251, 191, 36, .1); border: 1px solid rgba(251, 191, 36, .32); }
+
+/* ---------- How it works: the pipeline ---------- */
+.pipe { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; position: relative; }
+.stage-box {
+  position: relative; padding: 20px 18px; border-radius: 18px; border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .025); transition: border-color .3s, background .3s, box-shadow .3s;
+}
+.stage-box .n {
+  width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; font: 600 14px var(--mono);
+  background: rgba(255, 255, 255, .06); color: var(--ink-2); margin-bottom: 12px; transition: background .3s, color .3s;
+}
+.stage-box h3 { margin: 0 0 6px; font-size: 16.5px; font-weight: 700; }
+.stage-box p { margin: 0; font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+.stage-box .val { margin-top: 12px; font: 13px/1.55 var(--mono); color: var(--violet); word-break: break-word; }
+.stage-box.on { border-color: rgba(167, 139, 250, .6); background: rgba(99, 102, 241, .1); box-shadow: 0 0 40px -14px rgba(167, 139, 250, .7); }
+.stage-box.on .n, .stage-box.done .n { background: var(--indigo); color: #fff; }
+.stage-box.done { border-color: rgba(167, 139, 250, .28); }
+.pipe-arrow { position: absolute; top: 34px; width: 14px; height: 2px; background: rgba(167, 139, 250, .5); }
+
+/* ---------- Table + steps ---------- */
+.split { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 34px; align-items: start; }
+.tbl { border: 1px solid var(--line); border-radius: 16px; overflow-x: auto; background: rgba(0, 0, 0, .18); }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 14px; font-weight: 600; color: var(--mute); padding: 14px 18px; border-bottom: 1px solid var(--line); }
+td { padding: 13px 18px; border-bottom: 1px solid var(--line-2); font-size: 15.5px; }
+tr:last-child td { border-bottom: 0; }
+th.r, td.r { text-align: right; }
+td.r { font-family: var(--mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.i { font-family: var(--mono); color: var(--mute); width: 46px; }
+.tok {
+  font-family: var(--mono); font-size: 15px; white-space: pre; padding: 3px 9px; border-radius: 8px;
+  background: rgba(255, 255, 255, .06); border-left: 3px solid var(--c, var(--violet));
+}
+
+.steps { position: relative; display: grid; gap: 18px; }
+.steps::before { content: ""; position: absolute; left: 17px; top: 20px; bottom: 30px; width: 2px; background: linear-gradient(rgba(255, 255, 255, .08), var(--violet)); }
+.step { position: relative; padding-left: 54px; }
+.step-n { position: absolute; left: 0; top: 0; width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; font: 600 15px var(--mono); background: var(--panel-solid); border: 1px solid var(--line); color: var(--ink-2); }
+.step.final .step-n { background: var(--indigo); border-color: var(--indigo); color: #fff; box-shadow: 0 0 24px -4px var(--indigo); }
+.step h3 { margin: 5px 0 12px; font-size: 18px; font-weight: 700; }
+.mult { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 9px; font: 14.5px var(--mono); }
+.mult b { font-weight: 500; background: rgba(255, 255, 255, .06); padding: 4px 9px; border-radius: 8px; }
+.mult i { font-style: normal; color: var(--mute); }
+.mult .eq { background: rgba(99, 102, 241, .2); color: #c7c4ff; font-weight: 600; }
+.n-big { font-family: var(--display); font-size: 40px; font-weight: 600; letter-spacing: -.03em; line-height: 1; }
+.final-box {
+  border-radius: 20px; padding: 22px 24px; border: 1px solid rgba(167, 139, 250, .35);
+  background: radial-gradient(120% 120% at 100% 0%, rgba(167, 139, 250, .22), rgba(99, 102, 241, .06) 60%);
+}
+.root { font: 15px var(--mono); color: var(--ink-2); }
+.ppl {
+  font-family: var(--display); font-weight: 700; font-size: clamp(46px, 6.4vw, 84px); line-height: 1.02; letter-spacing: -.04em;
+  margin: 8px 0 10px; color: #fff; text-shadow: 0 0 40px rgba(167, 139, 250, .65); font-variant-numeric: tabular-nums;
+}
+.logs { font: 13px/1.75 var(--mono); color: var(--ink-2); }
+
+.wheel-row {
+  margin-top: 32px; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 36px; align-items: center;
+  padding: 28px 32px; border-radius: 22px; background: rgba(0, 0, 0, .22); border: 1px solid var(--line-2);
+}
+/* 3D wheel: tilts (rotateX/rotateY) and turns (rotateZ) with the cursor.
+   --rx, --ry, --rz are set from the mouse position in the script. */
+.wheel-wrap { position: relative; width: 220px; height: 220px; perspective: 760px; }
+.wheel-tilt {
+  position: absolute; inset: 0; transform-style: preserve-3d;
+  transform: rotateX(var(--rx, 18deg)) rotateY(var(--ry, -14deg));
+  transition: transform .35s cubic-bezier(.2, .8, .2, 1);
+}
+.wheel-face { position: absolute; inset: 0; transform-style: preserve-3d; transform: rotateZ(var(--rz, 0deg)); transition: transform .35s cubic-bezier(.2, .8, .2, 1); }
+.wheel-face canvas { position: absolute; inset: 0; width: 220px; height: 220px; display: block; border-radius: 50%; transition: transform 2.6s cubic-bezier(.15, .85, .2, 1); }
+/* stacked discs behind the face give the wheel real thickness */
+.rim { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, #2b2d78 60%, #1a1b4a 100%); }
+.rim:nth-child(1) { transform: translateZ(-1.5px); } .rim:nth-child(2) { transform: translateZ(-3px); }
+.rim:nth-child(3) { transform: translateZ(-4.5px); } .rim:nth-child(4) { transform: translateZ(-6px); }
+.rim:nth-child(5) { transform: translateZ(-7.5px); } .rim:nth-child(6) { transform: translateZ(-9px); }
+.rim:nth-child(7) { transform: translateZ(-10.5px); } .rim:nth-child(8) { transform: translateZ(-12px); }
+.rim:nth-child(9) { transform: translateZ(-13.5px); } .rim:nth-child(10) { transform: translateZ(-15px); background: #101132; box-shadow: 0 0 40px rgba(99, 102, 241, .45); }
+.wheel-shadow { position: absolute; left: 10%; right: 10%; bottom: -26px; height: 26px; border-radius: 50%; background: radial-gradient(closest-side, rgba(99, 102, 241, .45), transparent); filter: blur(6px); }
+.wheel-pin { position: absolute; left: 50%; top: -12px; transform: translateX(-50%) translateZ(18px); border: 10px solid transparent; border-top: 18px solid #fff; width: 0; height: 0; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .6)); }
+.wheel-hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) translateZ(26px); width: 96px; height: 96px; border-radius: 50%; background: var(--panel-solid); border: 1px solid rgba(167, 139, 250, .4); box-shadow: 0 12px 30px -8px rgba(0, 0, 0, .8), 0 0 24px -6px rgba(167, 139, 250, .6); display: grid; place-content: center; text-align: center; pointer-events: none; }
+.wheel-hub b { font-family: var(--display); font-size: 18px; font-weight: 600; line-height: 1.15; }
+.wheel-hub small { font: 11px var(--mono); color: var(--mute); }
+.wheel-text p { margin: 0 0 16px; color: var(--ink-2); font-size: 18.5px; max-width: 32em; }
+.wheel-text strong { color: var(--ink); }
+.btn-soft {
+  border: 1px solid var(--line); background: rgba(255, 255, 255, .04); border-radius: 12px; padding: 10px 16px; font-size: 15px; font-weight: 600; color: var(--ink-2);
+  transition: border-color .2s, color .2s, background .2s;
+}
+.btn-soft:hover:not(:disabled) { border-color: rgba(167, 139, 250, .6); color: var(--ink); background: rgba(99, 102, 241, .14); }
+details { margin-top: 16px; color: var(--ink-2); font-size: 15.5px; }
+summary { cursor: pointer; font-weight: 700; color: var(--ink); }
+details p { margin: 8px 0 0; max-width: 42em; }
+.actions { margin-top: 26px; display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+
+/* ---------- Next token: branches into bars ---------- */
+.fan { display: grid; grid-template-columns: auto 190px minmax(0, 1fr); align-items: center; }
+.origin { font: 16px var(--mono); padding: 10px 14px; border-radius: 12px; background: #fff; color: #090a16; white-space: pre; max-width: 170px; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 0 30px -6px rgba(167, 139, 250, .8); }
+.fan svg { width: 190px; height: 440px; display: block; overflow: visible; }
+.fan path { fill: none; stroke-linecap: round; }
+.bars { display: grid; gap: 8px; }
+.brow {
+  height: 48px; display: grid; grid-template-columns: 140px minmax(0, 1fr) 82px; gap: 16px; align-items: center; padding: 0 14px;
+  border: 1px solid transparent; border-radius: 14px; background: transparent; text-align: left; transition: background .2s, border-color .2s;
+}
+.brow:hover:not(:disabled) { background: rgba(255, 255, 255, .04); border-color: var(--line); }
+.brow .bt { font: 15.5px var(--mono); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.brow .track { display: block; height: 14px; border-radius: 9px; background: rgba(255, 255, 255, .06); overflow: hidden; }
+.brow .fill { display: block; height: 100%; width: 0; border-radius: 9px; background: rgba(167, 139, 250, .45); transition: width .8s cubic-bezier(.2, .8, .2, 1); }
+.brow .pc { font: 15px var(--mono); text-align: right; color: var(--ink-2); }
+.brow.top { background: rgba(99, 102, 241, .14); border-color: rgba(167, 139, 250, .45); }
+.brow.top .bt, .brow.top .pc { color: #fff; font-weight: 600; }
+.brow.top .fill { background: linear-gradient(90deg, var(--cyan), var(--violet), var(--pink)); box-shadow: 0 0 16px rgba(167, 139, 250, .7); }
+.fan-note { margin: 22px 0 0; color: var(--ink-2); font-size: 15.5px; }
+
+/* ---------- By hand ---------- */
+.presets { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 24px; }
+.presets span { color: var(--mute); font-size: 15px; margin-right: 2px; }
+.mini { height: 420px; margin: 0 0 26px; }
+.rows { display: grid; gap: 10px; }
+.row {
+  display: grid; grid-template-columns: 30px minmax(110px, 170px) minmax(140px, 1fr) 110px auto; gap: 16px; align-items: center;
+  padding: 10px 12px 10px 16px; border-radius: 16px; border: 1px solid var(--line); background: rgba(255, 255, 255, .025);
+}
+.row.bad { border-color: rgba(255, 107, 129, .5); background: rgba(255, 77, 109, .08); }
+.row .i { font-family: var(--mono); color: var(--mute); font-size: 14px; }
+.row input[type=text], .row input[type=number] {
+  width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: rgba(0, 0, 0, .3);
+  font: 16px var(--mono); outline: 0;
+}
+.row input:focus { border-color: rgba(167, 139, 250, .7); }
+.row.bad input[type=number] { border-color: var(--error); }
+.drag { position: relative; height: 34px; border-radius: 11px; background: rgba(255, 255, 255, .05); cursor: ew-resize; touch-action: none; overflow: hidden; }
+.drag-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 11px; background: var(--c, var(--violet)); opacity: .9; box-shadow: 0 0 18px var(--c, var(--violet)); }
+.drag-cap { position: absolute; top: 5px; bottom: 5px; width: 4px; margin-left: -8px; border-radius: 3px; background: #fff; }
+.remove { border: 1px solid var(--line); background: transparent; border-radius: 10px; padding: 8px 12px; font-size: 14px; color: var(--ink-2); }
+.remove:hover { color: var(--error); border-color: rgba(255, 107, 129, .5); }
+.add { margin-top: 14px; }
+.gap { height: 36px; }
+
+/* ---------- Ranking ---------- */
+.rank { display: grid; gap: 10px; }
+.rk {
+  display: grid; grid-template-columns: 34px minmax(160px, 1.2fr) minmax(0, 2fr) 110px; gap: 18px; align-items: center; text-align: left;
+  padding: 13px 18px; border-radius: 16px; border: 1px solid var(--line); background: rgba(255, 255, 255, .025); transition: border-color .2s, background .2s;
+}
+.rk:hover:not(:disabled) { border-color: rgba(167, 139, 250, .55); background: rgba(99, 102, 241, .1); }
+.rk .n { font-family: var(--mono); color: var(--mute); }
+.rk .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rk .t { display: block; height: 10px; border-radius: 9px; background: rgba(255, 255, 255, .06); overflow: hidden; }
+.rk .f { display: block; height: 100%; border-radius: 9px; background: linear-gradient(90deg, var(--cyan), var(--violet), var(--pink)); background-size: 640px 100%; }
+.rk .v { font-family: var(--mono); font-weight: 600; text-align: right; }
+.rank-foot { margin-top: 18px; display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; color: var(--ink-2); font-size: 15px; }
+
+footer { text-align: center; color: var(--mute); font-size: 14px; padding: 0 20px 60px; }
+footer a { color: var(--ink-2); }
+
+/* =====================================================================
+   6. SMALL SCREENS + REDUCED MOTION
+   ===================================================================== */
+@media (max-width: 980px) {
+  .pipe { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pipe-arrow { display: none; }
+}
+@media (max-width: 760px) {
+  .nav { display: none; }
+  .pill { margin-left: auto; }
+  .hero { padding-top: 40px; }
+  .ask { flex-direction: column; }
+  .btn { padding: 16px 24px; }
+  .card { padding: 30px 20px; }
+  .head { flex-wrap: wrap; }
+  .tag { margin-left: 0; }
+  .pipe { grid-template-columns: minmax(0, 1fr); }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .ppl { font-size: 42px; }
+  .wheel-row { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; padding: 24px 18px; }
+  .fan { grid-template-columns: minmax(0, 1fr); }
+  .fan svg, .origin { display: none; }
+  .brow { grid-template-columns: 96px minmax(0, 1fr) 68px; gap: 10px; }
+  .row { grid-template-columns: 24px minmax(0, 1fr) 92px; }
+  .row .drag { grid-column: 1 / -1; grid-row: 2; }
+  .row .remove { grid-column: 1 / -1; }
+  .rk { grid-template-columns: 26px minmax(0, 1fr) 90px; }
+  .rk .t { grid-column: 1 / -1; grid-row: 2; }
+  .stage-key, .stage-move { display: none; }
+  .mini { height: 260px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+
+<body>
+
+<!-- Moving background -->
+<canvas id="space" aria-hidden="true"></canvas>
+<div class="glow a" aria-hidden="true"></div>
+<div class="glow b" aria-hidden="true"></div>
+<div class="glow c" aria-hidden="true"></div>
+
+<!-- ============================ TOP BAR ============================ -->
+<div class="topbar">
+  <div class="wrap">
+    <a class="logo" href="#top">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
+        <rect width="30" height="30" rx="9" fill="#6366f1"/>
+        <path d="M4 22 L10 13 L14 18 L19 8 L26 22 Z" fill="#fff"/>
+        <path d="M4 17 H26" stroke="#f472b6" stroke-width="1.6" stroke-dasharray="2.4 2"/>
+      </svg>
+      Perplexity Explorer
+    </a>
+    <nav class="nav">
+      <a href="#how">How it works</a>
+      <a href="#s2">Results</a>
+      <a href="#s4">By hand</a>
+    </nav>
+    <span class="pill" id="pill"><span class="dot"></span><span id="pill-text">Model not loaded</span></span>
+  </div>
+</div>
+
+<div class="wrap" id="top">
+
+  <!-- ============================ SECTION 1: type a sentence ============================ -->
+  <section class="hero" id="s1">
+    <div class="hero-copy" id="hero-copy">
+      <h1>Perplexity Explorer</h1>
+      <p class="sub">Type a sentence. A real language model, DistilGPT-2, runs inside this page and turns its surprise at every token into a 3D terrain you can look around.</p>
+
+      <div class="ask">
+        <label class="field" for="sentence">
+          <input id="sentence" type="text" value="I love Python" autocomplete="off" spellcheck="false" aria-label="Your sentence">
+        </label>
+        <button class="btn" id="calc-btn"><span class="spin"></span>Calculate perplexity</button>
+      </div>
+
+      <div class="samples">
+        <span>Try</span>
+        <button class="chip sample">I love Python</button>
+        <button class="chip sample">Python love I</button>
+        <button class="chip sample">The capital of France is Paris</button>
+      </div>
+
+      <div class="status-row">
+        <div class="status" id="status" aria-live="polite"><span class="dot"></span><span id="status-text">Model not loaded yet. It downloads once, the first time you calculate.</span></div>
+        <div class="bar" id="bar" hidden><div id="bar-fill"></div></div>
+      </div>
+
+      <div class="msg note" id="note" hidden></div>
+      <div class="msg error" id="error" hidden role="alert"></div>
+    </div>
+
+    <!-- 3D terrain: each mountain is a token, height = how surprised the model was -->
+    <div class="stage" id="stage">
+      <canvas id="terrain" aria-label="3D surprise terrain of your sentence"></canvas>
+      <div class="stage-hint" id="stage-hint">Click “Calculate perplexity” and your sentence rises out of this grid, one mountain per token.</div>
+      <div class="stage-key" id="stage-key" hidden><span>low surprise</span><span class="ramp"></span><span>high surprise</span></div>
+      <div class="stage-move">Move your cursor to look around</div>
+      <div class="tip" id="tip" hidden></div>
+    </div>
+  </section>
+
+  <main>
+
+    <!-- ============================ HOW IT WORKS (fills with real values) ============================ -->
+    <section class="card" id="how">
+      <div class="head">
+        <div>
+          <h2>How the number is made</h2>
+          <p>These five steps run every time you click Calculate. After a run, each box shows the real values from your sentence.</p>
+        </div>
+      </div>
+      <div class="pipe" id="pipe">
+        <div class="stage-box" data-stage="1"><div class="n">1</div><h3>Your text</h3><p>The sentence you typed.</p><div class="val" id="v1"></div></div>
+        <div class="stage-box" data-stage="2"><div class="n">2</div><h3>Tokens</h3><p>Split into pieces with ids. Id 50256 is added first as a start marker.</p><div class="val" id="v2"></div></div>
+        <div class="stage-box" data-stage="3"><div class="n">3</div><h3>Model</h3><p>One pass gives a score (logit) for all 50,257 possible tokens at every position.</p><div class="val" id="v3"></div></div>
+        <div class="stage-box" data-stage="4"><div class="n">4</div><h3>Softmax</h3><p>Scores become probabilities. We read P of the token that really came next.</p><div class="val" id="v4"></div></div>
+        <div class="stage-box" data-stage="5"><div class="n">5</div><h3>Perplexity</h3><p>exp(average of −ln P). Lower means the model found it more natural.</p><div class="val" id="v5"></div></div>
+      </div>
+    </section>
+
+    <!-- ============================ SECTION 2 (appears after a run) ============================ -->
+    <section class="card" id="s2" hidden>
+      <div class="head">
+        <div>
+          <h2>Probability of each token, then perplexity</h2>
+          <p>Every number here comes from the model's output. Nothing is estimated.</p>
+        </div>
+        <span class="tag real">From DistilGPT-2</span>
+      </div>
+      <div id="s2-analysis"></div>
+      <div class="actions">
+        <button class="btn-soft" id="copy">Copy results</button>
+        <button class="btn-soft" id="to-manual">Edit these probabilities by hand</button>
+      </div>
+    </section>
+
+    <!-- ============================ SECTION 3 (appears after a run) ============================ -->
+    <section class="card" id="s3" hidden>
+      <div class="head">
+        <div>
+          <h2>What does the model predict next?</h2>
+          <p>Its 8 most likely next tokens. The thicker the branch, the likelier the token.</p>
+        </div>
+        <span class="tag real">From DistilGPT-2</span>
+      </div>
+      <div class="fan">
+        <div class="origin" id="origin"></div>
+        <svg id="fan-svg" viewBox="0 0 190 440" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div class="bars" id="bars"></div>
+      </div>
+      <p class="fan-note" id="fan-note"></p>
+    </section>
+
+    <!-- ============================ SECTION 4: by hand ============================ -->
+    <section class="card" id="s4">
+      <div class="head">
+        <div>
+          <h2>Try it by hand</h2>
+          <p>Set your own probabilities. Drag a bar or type a number and watch the terrain, table and perplexity change.</p>
+        </div>
+        <span class="tag sim">Simulated, not from the model</span>
+      </div>
+
+      <div class="presets">
+        <span>Presets</span>
+        <button class="chip" data-preset="python">I love Python</button>
+        <button class="chip" data-preset="eighth">All 1/8</button>
+        <button class="chip" data-preset="surprise">One surprising word</button>
+      </div>
+
+      <div class="stage mini"><canvas id="mini-terrain" aria-label="3D terrain of your hand-made probabilities"></canvas><div class="tip" id="mini-tip" hidden></div></div>
+
+      <div class="rows" id="rows"></div>
+      <button class="btn-soft add" id="add-row">+ Add token</button>
+
+      <div class="gap"></div>
+      <div class="msg note" id="manual-note" hidden></div>
+      <div id="s4-analysis"></div>
+    </section>
+
+    <!-- ============================ RANKING (appears after a run) ============================ -->
+    <section class="card" id="s5" hidden>
+      <div class="head">
+        <div>
+          <h2>Your sentences, ranked</h2>
+          <p>Least surprising first. Run “I love Python” and “Python love I” to see word order matter.</p>
+        </div>
+        <span class="tag real">From DistilGPT-2</span>
+      </div>
+      <div class="rank" id="rank"></div>
+      <div class="rank-foot"><span>Log scale, so small and huge perplexities fit together. Click a sentence to run it again.</span><button class="btn-soft" id="clear">Clear ranking</button></div>
+    </section>
+
+  </main>
+
+  <footer>
+    Model: <a href="https://huggingface.co/Xenova/distilgpt2" target="_blank" rel="noopener">Xenova/distilgpt2</a>, 8-bit, via Transformers.js. Everything runs in your browser; your text never leaves your device.
+  </footer>
+</div>
+
+
+<script type="module">
+/* =====================================================================
+   PERPLEXITY EXPLORER: all the logic is in this one script.
+
+   The idea in 4 steps:
+     1. Turn the sentence into token ids.
+     2. Run the model: at each position it gives a score ("logit")
+        for every token in its vocabulary.
+     3. Softmax turns scores into probabilities. We read the
+        probability of the token that really came next.
+     4. Perplexity = (product of 1/P) ^ (1/N)
+                   = exp( average of -ln P )    <- same value, no overflow
+   ===================================================================== */
+
+// ---------- Settings ----------
+const LIBRARY_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3";
+const MODEL_ID    = "Xenova/distilgpt2";
+const START_ID    = 50256;   // GPT-2's "<|endoftext|>" token, used as a start marker
+const TOP_K       = 8;
+
+// ---------- State ----------
+let tokenizer = null, model = null, Tensor = null;
+let loadingPromise = null;   // so the model is only downloaded once
+let busy = false;            // true while the model is working
+let lastResult = null;       // the latest real model result
+let ranking = [];            // sentences for the ranking section
+let manualRows = [];         // rows for "Try it by hand": { label, value }
+
+const $ = (id) => document.getElementById(id);
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// Is this page inside a preview frame? Previews often block downloads.
+let inFrame = false;
+try { inFrame = window.self !== window.top; } catch (e) { inFrame = true; }
+
+
+/* =====================================================================
+   FORMATTING HELPERS
+   ===================================================================== */
+function escapeHTML(text) {
+  return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+// Make invisible characters visible: space -> ␣, newline -> ↵
+function visible(text) {
+  if (text === "") return "∅";
+  return String(text).replace(/ /g, "␣").replace(/\n/g, "↵").replace(/\t/g, "⇥");
+}
+const showToken = (text) => escapeHTML(visible(text));
+
+// Scientific notation from a base-10 log: 3.21 × 10⁻⁷
+function sciFromLog10(log10) {
+  let e = Math.floor(log10);
+  let m = Math.pow(10, log10 - e);
+  if (m >= 9.995) { m = 1; e += 1; }
+  return `${m.toFixed(2)} × 10<sup>${e < 0 ? "−" + (-e) : e}</sup>`;
+}
+function fmt(x) {
+  if (!isFinite(x)) return "∞";
+  if (x === 0) return "0";
+  if (x >= 1e6 || x < 1e-3) return sciFromLog10(Math.log10(x));
+  return x.toLocaleString("en-US", { maximumSignificantDigits: 4 });
+}
+function fmtFromLog10(log10) {
+  if (log10 < 6 && log10 >= -3) return fmt(Math.pow(10, log10));
+  return sciFromLog10(log10);
+}
+function fmtPPL(ppl) {
+  if (!isFinite(ppl)) return "∞";
+  if (ppl < 1e6) return ppl.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return fmt(ppl);
+}
+function pct(p) {
+  if (p * 100 < 0.001) return "<0.001%";
+  return (p * 100).toFixed(p < 0.001 ? 3 : p < 0.01 ? 2 : 1) + "%";
+}
+
+// Colour for a height between 0 and 1: cyan -> violet -> pink
+function heightRGB(t) {
+  const cyan = [56, 189, 248], violet = [167, 139, 250], pink = [244, 114, 182];
+  t = Math.min(Math.max(t, 0), 1);
+  const [a, b, k] = t < 0.5 ? [cyan, violet, t * 2] : [violet, pink, (t - 0.5) * 2];
+  return a.map((v, i) => v + (b[i] - v) * k);
+}
+// Colour for a probability (more surprise = pinker), 14+ bits = fully pink
+function surpriseColor(p) {
+  const rgb = heightRGB(Math.min(-Math.log2(p) / 14, 1)).map(Math.round);
+  return `rgb(${rgb.join(",")})`;
+}
+
+
+/* =====================================================================
+   THE MATH (shared by the real model and "Try it by hand")
+   ===================================================================== */
+function computePerplexity(items) {   // items = [{ label, p }]
+  const N = items.length;
+  let sumNegLog = 0;                   // Σ -ln P (adding logs never overflows)
+  for (const item of items) sumNegLog += -Math.log(item.p);
+  const avgNegLog = sumNegLog / N;
+  return {
+    N, sumNegLog, avgNegLog,
+    avgBits: avgNegLog / Math.LN2,      // the same average in bits (log base 2)
+    productLog10: sumNegLog / Math.LN10,
+    perplexity: Math.exp(avgNegLog)     // exp(average of -ln P)
+  };
+}
+
+
+/* =====================================================================
+   CURSOR TRACKING (used by the background, the hero and the 3D graphs)
+   mouse.x and mouse.y go from -1 to 1 across the window.
+   ===================================================================== */
+const mouse = { x: 0, y: 0 };
+window.addEventListener("pointermove", (e) => {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = (e.clientY / window.innerHeight) * 2 - 1;
+  if (reduceMotion) return;
+  // The glowing clouds and the hero text drift with the cursor (parallax)
+  document.querySelector(".glow.a").style.transform = `translate(${mouse.x * 60}px, ${mouse.y * 40}px)`;
+  document.querySelector(".glow.b").style.transform = `translate(${mouse.x * -70}px, ${mouse.y * -50}px)`;
+  document.querySelector(".glow.c").style.transform = `translate(${mouse.x * 40}px, ${mouse.y * -30}px)`;
+  $("hero-copy").style.transform = `translate(${mouse.x * -10}px, ${mouse.y * -6}px)`;
+  // 3D wheels: tilt toward the cursor and turn as it moves left/right
+  const root = document.documentElement.style;
+  root.setProperty("--rx", `${18 - mouse.y * 26}deg`);
+  root.setProperty("--ry", `${mouse.x * 34}deg`);
+  root.setProperty("--rz", `${mouse.x * 70}deg`);
+});
+
+
+/* =====================================================================
+   BACKGROUND: a field of stars at 3 depths. Near stars move more
+   than far ones when the cursor moves, which makes it feel 3D.
+   ===================================================================== */
+(function starfield() {
+  const canvas = $("space");
+  const ctx = canvas.getContext("2d");
+  let W = 0, H = 0, stars = [];
+  const cam = { x: 0, y: 0 };
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const count = Math.round((W * H) / 5200);
+    stars = Array.from({ length: count }, () => ({
+      x: Math.random() * W, y: Math.random() * H,
+      z: Math.random() * 0.9 + 0.1,               // depth: 1 = near, 0.1 = far
+      tw: Math.random() * Math.PI * 2             // twinkle phase
+    }));
+  }
+
+  function frame(t) {
+    cam.x += (mouse.x - cam.x) * 0.05;            // smooth follow
+    cam.y += (mouse.y - cam.y) * 0.05;
+    ctx.clearRect(0, 0, W, H);
+    for (const s of stars) {
+      const x = (s.x - cam.x * 40 * s.z + W) % W;
+      const y = (s.y - cam.y * 30 * s.z - window.scrollY * 0.08 * s.z + H * 10) % H;
+      const a = 0.25 + 0.55 * s.z * (0.75 + 0.25 * Math.sin(t / 900 + s.tw));
+      ctx.fillStyle = `rgba(210, 215, 255, ${a})`;
+      ctx.fillRect(x, y, s.z * 1.8, s.z * 1.8);
+    }
+    if (!reduceMotion) requestAnimationFrame(frame);
+  }
+
+  resize();
+  window.addEventListener("resize", resize);
+  requestAnimationFrame(frame);
+  if (reduceMotion) window.addEventListener("scroll", () => requestAnimationFrame(frame));
+})();
+
+
+/* =====================================================================
+   THE 3D TERRAIN GRAPH
+   A grid of small squares. Each token adds a mountain whose height is
+   its surprise in bits (-log2 P). We rotate the grid in 3D, project it
+   onto the 2D canvas, and paint far squares first so near ones cover
+   them (the "painter's algorithm"). The camera follows your cursor.
+   ===================================================================== */
+const COLS = 72, ROWS = 26;        // grid resolution
+const WX = 1.7, WZ = 0.75;         // half-width and half-depth of the world
+const HY = 1.0;                    // height of the tallest mountain
+
+class Terrain {
+  constructor(canvas, tip) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.tip = tip;
+    this.items = null;
+    this.stats = null;
+    this.heights = new Float32Array((COLS + 1) * (ROWS + 1));
+    this.peaks = [];
+    this.rise = 1;
+    this.riseStart = 0;
+    this.waving = false;             // gentle ripple while the model loads
+    this.yaw = -0.5; this.pitch = 0.5;
+    this.visible = true;
+    this.screenPeaks = [];
+
+    this.resize();
+    new ResizeObserver(() => this.resize()).observe(canvas);
+    new IntersectionObserver(([e]) => (this.visible = e.isIntersecting)).observe(canvas);
+    canvas.addEventListener("pointermove", (e) => this.hover(e));
+    canvas.addEventListener("pointerleave", () => (this.tip.hidden = true));
+    this.loop = this.loop.bind(this);
+    requestAnimationFrame(this.loop);
+  }
+
+  resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.W = this.canvas.clientWidth; this.H = this.canvas.clientHeight;
+    this.canvas.width = Math.max(1, Math.round(this.W * dpr));
+    this.canvas.height = Math.max(1, Math.round(this.H * dpr));
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // Give the terrain new tokens. animate = let the mountains rise.
+  setData(items, stats, animate) {
+    this.items = items; this.stats = stats;
+    this.build();
+    if (animate && !reduceMotion) { this.rise = 0; this.riseStart = performance.now(); }
+    else this.rise = 1;
+  }
+
+  clear() { this.items = null; this.stats = null; this.build(); }
+
+  // Work out the height of every grid point
+  build() {
+    const h = this.heights;
+    h.fill(0);
+    this.peaks = [];
+    if (!this.items || !this.items.length) return;
+
+    const n = this.items.length;
+    const bits = this.items.map((it) => -Math.log2(it.p));
+    this.maxBits = Math.max(4, ...bits);              // at least 4 bits tall scale
+    const span = WX * 0.84;
+    const spacing = (2 * span) / n;
+    const sx = Math.min(0.5, Math.max(0.06, spacing * 0.42));   // mountain width
+    const sz = 0.4;                                             // mountain depth
+    const xs = this.items.map((_, i) => -span + (i + 0.5) * spacing);
+
+    for (let r = 0; r <= ROWS; r++) {
+      const z = -WZ + (2 * WZ * r) / ROWS;
+      for (let c = 0; c <= COLS; c++) {
+        const x = -WX + (2 * WX * c) / COLS;
+        let best = 0;
+        // Use the tallest mountain at this point, so each peak keeps its exact height
+        for (let i = 0; i < n; i++) {
+          const v = (bits[i] / this.maxBits) * Math.exp(-((x - xs[i]) ** 2) / (2 * sx * sx) - (z * z) / (2 * sz * sz));
+          if (v > best) best = v;
+        }
+        h[r * (COLS + 1) + c] = best * HY;
+      }
+    }
+    this.peaks = this.items.map((it, i) => ({ x: xs[i], y: (bits[i] / this.maxBits) * HY, item: it, bits: bits[i] }));
+    this.avgY = (this.stats.avgBits / this.maxBits) * HY;
+  }
+
+  // 3D point -> 2D screen point. Returns [screenX, screenY, depth]
+  project(x, y, z) {
+    const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
+    const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+    const x1 = x * cy - z * sy;            // turn left/right
+    const z1 = x * sy + z * cy;
+    const y2 = y * cp + z1 * sp;           // tilt up/down
+    const z2 = -y * sp + z1 * cp;
+    const D = 4.2;                         // camera distance
+    const d = D + z2;
+    const s = this.F / d;
+    return [this.cx + x1 * s, this.cyScreen - y2 * s, d];
+  }
+
+  loop(now) {
+    requestAnimationFrame(this.loop);
+    if (!this.visible || !this.W) return;
+
+    // Camera smoothly follows the cursor
+    const targetYaw = -0.42 + mouse.x * 0.55;
+    const targetPitch = 0.5 + mouse.y * 0.2;
+    const k = reduceMotion ? 1 : 0.06;
+    this.yaw += (targetYaw - this.yaw) * k;
+    this.pitch += (targetPitch - this.pitch) * k;
+
+    if (this.rise < 1) {
+      const t = Math.min((now - this.riseStart) / 1100, 1);
+      this.rise = 1 - Math.pow(1 - t, 3);
+    }
+    this.draw(now);
+  }
+
+  draw(now) {
+    const ctx = this.ctx, W = this.W, H = this.H;
+    this.F = Math.min(W * 1.0, H * 1.65);   // zoom: fit width, keep peaks below the top
+    this.cx = W / 2;
+    this.cyScreen = H * 0.68;
+    ctx.clearRect(0, 0, W, H);
+
+    const h = this.heights;
+    const rise = this.rise;
+    const wave = this.waving && !this.items && !reduceMotion;
+    const pts = new Array((COLS + 1) * (ROWS + 1));
+
+    // 1. Project every grid point
+    for (let r = 0; r <= ROWS; r++) {
+      const z = -WZ + (2 * WZ * r) / ROWS;
+      for (let c = 0; c <= COLS; c++) {
+        const x = -WX + (2 * WX * c) / COLS;
+        let y = h[r * (COLS + 1) + c] * rise;
+        if (wave) y = 0.05 * Math.sin(Math.hypot(x, z * 1.8) * 6 - now / 260) * Math.max(0, 1 - Math.hypot(x, z) / 1.8);
+        pts[r * (COLS + 1) + c] = this.project(x, y, z);
+      }
+    }
+
+    // 2. Build squares with their depth and shading
+    const quads = [];
+    const L = [-0.45, 0.8, -0.4];           // light direction
+    const Ln = Math.hypot(...L);
+    const cellW = (2 * WX) / COLS, cellD = (2 * WZ) / ROWS;
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const i00 = r * (COLS + 1) + c, i10 = i00 + 1, i01 = i00 + COLS + 1, i11 = i01 + 1;
+        const h00 = h[i00] * rise, h10 = h[i10] * rise, h01 = h[i01] * rise, h11 = h[i11] * rise;
+        const dx = (h10 - h00 + h11 - h01) / (2 * cellW);
+        const dz = (h01 - h00 + h11 - h10) / (2 * cellD);
+        const nl = Math.hypot(dx, 1, dz);
+        const light = Math.max(0, (-dx * L[0] + 1 * L[1] - dz * L[2]) / (nl * Ln));
+        const avgH = (h00 + h10 + h01 + h11) / 4;
+        const d = (pts[i00][2] + pts[i10][2] + pts[i01][2] + pts[i11][2]) / 4;
+        quads.push({ a: pts[i00], b: pts[i10], c: pts[i11], e: pts[i01], d, t: avgH / HY, light });
+      }
+    }
+    quads.sort((q1, q2) => q2.d - q1.d);      // far first
+
+    // 3. Paint the squares: dark floor, glowing coloured mountains
+    const ground = [14, 17, 38];
+    for (const q of quads) {
+      const col = heightRGB(q.t);
+      const mix = Math.min(1, Math.max(0, (q.t - 0.015) / 0.16));   // floor -> mountain
+      const shade = 0.38 + 0.8 * q.light;
+      const rC = (ground[0] + (col[0] - ground[0]) * mix) * (mix > 0 ? shade : 1);
+      const gC = (ground[1] + (col[1] - ground[1]) * mix) * (mix > 0 ? shade : 1);
+      const bC = (ground[2] + (col[2] - ground[2]) * mix) * (mix > 0 ? shade : 1);
+      ctx.beginPath();
+      ctx.moveTo(q.a[0], q.a[1]); ctx.lineTo(q.b[0], q.b[1]); ctx.lineTo(q.c[0], q.c[1]); ctx.lineTo(q.e[0], q.e[1]); ctx.closePath();
+      ctx.fillStyle = `rgb(${rC | 0}, ${gC | 0}, ${bC | 0})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(150, 160, 255, ${0.10 + 0.28 * Math.min(q.t * 1.4, 1)})`;
+      ctx.lineWidth = 0.6;
+      ctx.stroke();
+    }
+
+    this.screenPeaks = [];
+    if (!this.items || rise < 0.98) return;
+
+    // 4. Glass plane at the AVERAGE surprise. Its height is what perplexity measures.
+    const y = this.avgY;
+    const c1 = this.project(-WX, y, -WZ), c2 = this.project(WX, y, -WZ), c3 = this.project(WX, y, WZ), c4 = this.project(-WX, y, WZ);
+    ctx.beginPath(); ctx.moveTo(c1[0], c1[1]); ctx.lineTo(c2[0], c2[1]); ctx.lineTo(c3[0], c3[1]); ctx.lineTo(c4[0], c4[1]); ctx.closePath();
+    ctx.fillStyle = "rgba(255, 255, 255, .07)"; ctx.fill();
+    ctx.setLineDash([6, 5]); ctx.strokeStyle = "rgba(255, 255, 255, .75)"; ctx.lineWidth = 1.4; ctx.stroke(); ctx.setLineDash([]);
+
+    // 5. Pins with labels on top of each mountain
+    const n = this.peaks.length;
+    const every = Math.max(1, Math.ceil(n / Math.max(3, Math.floor(W / 95))));
+    this.peaks.forEach((pk, i) => {
+      const [sx, sy] = this.project(pk.x, pk.y, 0);
+      this.screenPeaks.push({ sx, sy, pk });
+      const color = surpriseColor(pk.item.p);
+      ctx.beginPath(); ctx.arc(sx, sy, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff"; ctx.shadowColor = color; ctx.shadowBlur = 14; ctx.fill(); ctx.shadowBlur = 0;
+      if (i % every) return;
+      const top = sy - 34;
+      ctx.beginPath(); ctx.moveTo(sx, sy - 5); ctx.lineTo(sx, top + 10);
+      ctx.strokeStyle = "rgba(255, 255, 255, .5)"; ctx.lineWidth = 1; ctx.stroke();
+      let label = visible(pk.item.label);
+      if (label.length > 12) label = label.slice(0, 11) + "…";
+      ctx.font = '600 13px "JetBrains Mono", monospace';
+      const text = `${label}  ${pct(pk.item.p)}`;
+      const tw = ctx.measureText(text).width + 18;
+      ctx.fillStyle = "rgba(8, 9, 20, .85)";
+      roundRect(ctx, sx - tw / 2, top - 16, tw, 26, 8); ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.textAlign = "center";
+      ctx.fillText(text, sx, top + 2);
+    });
+
+    // 6. Label for the glass plane
+    const lbl = W < 560
+      ? `avg ${this.stats.avgBits.toFixed(2)} bits = PPL ${fmtPPL(this.stats.perplexity)}`
+      : `average surprise ${this.stats.avgBits.toFixed(2)} bits  →  perplexity 2^${this.stats.avgBits.toFixed(2)} = ${fmtPPL(this.stats.perplexity)}`;
+    ctx.font = '600 13px "JetBrains Mono", monospace';
+    const lw = ctx.measureText(lbl).width + 20;
+    const lx = Math.min(Math.max(10, c2[0] - lw), W - lw - 10);
+    const ly = Math.min(c2[1] + 12, H - 40);
+    ctx.fillStyle = "rgba(255, 255, 255, .95)";
+    roundRect(ctx, lx, ly, lw, 28, 9); ctx.fill();
+    ctx.fillStyle = "#090a16"; ctx.textAlign = "left";
+    ctx.fillText(lbl, lx + 10, ly + 19);
+  }
+
+  // Tooltip for the mountain nearest the cursor
+  hover(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let best = null, bestD = 50;
+    for (const s of this.screenPeaks) {
+      const d = Math.hypot(s.sx - mx, s.sy - my);
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    if (!best) { this.tip.hidden = true; return; }
+    this.tip.textContent = `${visible(best.pk.item.label)}   P = ${best.pk.item.p.toPrecision(4)}   surprise ${best.pk.bits.toFixed(2)} bits`;
+    this.tip.style.left = best.sx + "px";
+    this.tip.style.top = best.sy + "px";
+    this.tip.hidden = false;
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+const heroTerrain = new Terrain($("terrain"), $("tip"));
+const miniTerrain = new Terrain($("mini-terrain"), $("mini-tip"));
+
+
+/* =====================================================================
+   THE WHEEL: perplexity N = "as unsure as a fair wheel with N slices"
+   ===================================================================== */
+function drawWheel(canvas, ppl) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2), S = 220;
+  canvas.width = S * dpr; canvas.height = S * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const c = S / 2, r = S / 2 - 4;
+  const slices = Math.min(ppl, 720);           // more would be invisible
+  const step = (Math.PI * 2) / slices;
+  const whole = Math.floor(slices);
+  for (let k = 0; k < whole; k++) {
+    ctx.beginPath(); ctx.moveTo(c, c);
+    ctx.arc(c, c, r, -Math.PI / 2 + k * step, -Math.PI / 2 + (k + 1) * step);
+    ctx.closePath();
+    ctx.fillStyle = k === 0 ? "#f472b6" : k % 2 ? "#6366f1" : "#3b3d9e";   // pink = the one slice it needs
+    ctx.fill();
+  }
+  if (whole < slices) {                         // leftover bit of a slice (e.g. 2.32)
+    ctx.beginPath(); ctx.moveTo(c, c);
+    ctx.arc(c, c, r, -Math.PI / 2 + whole * step, Math.PI * 1.5);
+    ctx.closePath(); ctx.fillStyle = "#1d1f45"; ctx.fill();
+  }
+}
+function spinWheel(btn) {                        // just for fun; the maths doesn't change
+  const canvas = btn.closest(".wheel-row").querySelector("canvas");
+  const next = Number(canvas.dataset.turn || 0) + 1440 + Math.random() * 360;
+  canvas.dataset.turn = next;
+  canvas.style.transform = `rotate(${next}deg)`;
+}
+
+
+/* =====================================================================
+   TABLE + 3 STEPS + WHEEL (used for real results and "by hand")
+   ===================================================================== */
+function renderAnalysis(container, items, stats) {
+  const rows = items.map((it, i) => `
+    <tr>
+      <td class="i">${i + 1}</td>
+      <td><span class="tok" style="--c:${surpriseColor(it.p)}">${showToken(it.label)}</span></td>
+      <td class="r">${fmt(it.p)}</td>
+      <td class="r">${fmt(1 / it.p)}</td>
+    </tr>`).join("");
+  const terms = items.map((it) => `<b>${fmt(1 / it.p)}</b>`).join("<i>×</i>");
+  const product = fmtFromLog10(stats.productLog10);
+  const ppl = stats.perplexity;
+  const capNote = ppl > 720 ? " (the wheel is drawn with 720 slices; the real number is too many to see)" : "";
+
+  container.innerHTML = `
+    <div class="split">
+      <div class="tbl">
+        <table>
+          <thead><tr><th>#</th><th>Token</th><th class="r">Probability P</th><th class="r">1/P</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <span class="step-n">1</span>
+          <h3>Multiply all the 1/P values</h3>
+          <div class="mult">${terms}<i>=</i><b class="eq">${product}</b></div>
+        </div>
+        <div class="step">
+          <span class="step-n">2</span>
+          <h3>Count the tokens</h3>
+          <div class="n-big">N = ${stats.N}</div>
+        </div>
+        <div class="step final">
+          <span class="step-n">3</span>
+          <h3>Perplexity = (product)<sup>1/N</sup></h3>
+          <div class="final-box">
+            <div class="root">(${product})<sup>1/${stats.N}</sup> =</div>
+            <div class="ppl">${fmtPPL(ppl)}</div>
+            <div class="logs">
+              Computed with logs so it can't overflow:<br>
+              average of −ln P = ${stats.sumNegLog.toFixed(4)} ÷ ${stats.N} = ${stats.avgNegLog.toFixed(4)}<br>
+              perplexity = e<sup>${stats.avgNegLog.toFixed(4)}</sup> = ${fmtPPL(ppl)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="wheel-row">
+      <div class="wheel-wrap">
+        <div class="wheel-shadow"></div>
+        <div class="wheel-tilt">
+          <div class="wheel-face">${'<i class="rim"></i>'.repeat(10)}<canvas></canvas></div>
+          <div class="wheel-pin"></div>
+          <div class="wheel-hub"><b>${ppl < 1e5 ? fmtPPL(ppl) : fmt(ppl)}</b><small>slices</small></div>
+        </div>
+      </div>
+      <div class="wheel-text">
+        <p>Perplexity <strong>${fmtPPL(ppl)}</strong> means that, on average, the model was as unsure as if it had to spin a fair wheel with <strong>${fmtPPL(ppl)} slices</strong> and land on the pink one${capNote}.</p>
+        <button class="btn-soft spin-btn">Spin the wheel</button>
+        <details>
+          <summary>Why use logs instead of multiplying?</summary>
+          <p>Real probabilities can be tiny, like 0.00006. Multiply a few dozen of their 1/P values and the result becomes too big for the computer and turns into “Infinity”. Logs turn multiplying into adding: ln(a × b) = ln a + ln b. So we add up −ln P, take the average, and undo the log with e<sup>x</sup>. Same answer, no overflow.</p>
+        </details>
+      </div>
+    </div>`;
+  drawWheel(container.querySelector(".wheel-row canvas"), ppl);
+  container.querySelector(".spin-btn").addEventListener("click", (e) => spinWheel(e.currentTarget));
+}
+
+
+/* =====================================================================
+   STATUS, ERRORS, BUSY STATE, PIPELINE HIGHLIGHT
+   ===================================================================== */
+function setStatus(state, text) {
+  $("status").className = "status " + state;
+  $("status-text").textContent = text;
+  $("pill").className = "pill " + state;
+  $("pill-text").textContent = { idle: "Model not loaded", loading: "Downloading…", working: "Calculating…", ready: "Model ready", error: "Model error" }[state];
+  $("bar").hidden = state !== "loading";
+}
+function showError(title, details) {
+  $("error").innerHTML = `<strong>${escapeHTML(title)}</strong>${details ? `<code>${escapeHTML(details)}</code>` : ""}`;
+  $("error").hidden = false;
+}
+function showNote(text) { $("note").textContent = text; $("note").hidden = !text; }
+function clearMessages() { $("error").hidden = true; $("note").hidden = true; }
+
+function setBusy(value) {
+  busy = value;
+  $("calc-btn").classList.toggle("is-busy", value);
+  document.querySelectorAll("#calc-btn, .sample, .brow, .rk, #to-manual").forEach((b) => (b.disabled = value));
+}
+
+// Light up one step of the "How the number is made" pipeline
+function setPipe(active) {
+  document.querySelectorAll(".stage-box").forEach((box) => {
+    const s = Number(box.dataset.stage);
+    box.classList.toggle("on", s === active);
+    box.classList.toggle("done", active > 0 && s < active);
+  });
+}
+
+function hideModelResults() {
+  lastResult = null;
+  $("s2").hidden = true; $("s3").hidden = true;
+  heroTerrain.clear();
+  $("stage-hint").hidden = false; $("stage-key").hidden = true;
+  setPipe(0);
+}
+
+
+/* =====================================================================
+   LOADING THE MODEL (first click only)
+   ===================================================================== */
+function makeProgressTracker() {
+  const files = {};
+  return (info) => {
+    if (info.status === "progress" && info.total) {
+      files[info.file] = { loaded: info.loaded, total: info.total };
+      let loaded = 0, total = 0;
+      for (const f of Object.values(files)) { loaded += f.loaded; total += f.total; }
+      const p = Math.round((loaded / total) * 100);
+      $("bar-fill").style.width = p + "%";
+      $("status-text").textContent = `Downloading the model… ${p}% (${(loaded / 1e6).toFixed(1)} of ${(total / 1e6).toFixed(1)} MB)`;
+    }
+  };
+}
+
+async function loadModel() {
+  if (model && tokenizer) return;
+  if (!loadingPromise) {
+    loadingPromise = (async () => {
+      setStatus("loading", "Downloading the model…");
+      $("bar-fill").style.width = "0%";
+
+      // The library is imported here with import() instead of a static
+      // "import ... from" line at the top. Same URL and names, but nothing
+      // downloads until you click, and a network failure shows a red error
+      // instead of silently breaking the whole page.
+      const lib = await import(LIBRARY_URL);
+      const { AutoTokenizer, AutoModelForCausalLM, env } = lib;
+      Tensor = lib.Tensor;
+
+      // Can we use the browser cache? In locked-down pages (previews, some
+      // pages opened from a file) even *touching* "caches" throws an error,
+      // so we test it inside try/catch and switch the cache off if needed.
+      let cacheWorks = false;
+      try { cacheWorks = typeof caches !== "undefined" && !!(await caches.open("perplexity-probe")); } catch (e) { cacheWorks = false; }
+      env.useBrowserCache = cacheWorks;
+
+      const onProgress = makeProgressTracker();
+      tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID, { progress_callback: onProgress });
+      model = await AutoModelForCausalLM.from_pretrained(MODEL_ID, { dtype: "q8", progress_callback: onProgress });
+      setStatus("ready", "Model ready");
+    })();
+  }
+  try {
+    await loadingPromise;
+  } catch (err) {
+    loadingPromise = null; tokenizer = null; model = null;   // allow a retry
+    throw err;
+  }
+}
+
+
+/* =====================================================================
+   RUNNING THE MODEL
+   ===================================================================== */
+// Stable log-softmax: ln P(id) = (logit[id] - max) - ln Σ e^(logit - max)
+// Subtracting the max first stops e^x from overflowing.
+function logProbAt(row, id) {
+  let max = -Infinity;
+  for (let i = 0; i < row.length; i++) if (row[i] > max) max = row[i];
+  let sum = 0;
+  for (let i = 0; i < row.length; i++) sum += Math.exp(row[i] - max);
+  return (row[id] - max) - Math.log(sum);
+}
+
+// The k most likely next tokens from one row of logits
+function topK(row, k) {
+  let max = -Infinity;
+  for (let i = 0; i < row.length; i++) if (row[i] > max) max = row[i];
+  let sum = 0;
+  for (let i = 0; i < row.length; i++) sum += Math.exp(row[i] - max);
+  const best = [];
+  for (let i = 0; i < row.length; i++) {
+    if (best.length < k || row[i] > best[best.length - 1].logit) {
+      best.push({ id: i, logit: row[i] });
+      best.sort((a, b) => b.logit - a.logit);
+      if (best.length > k) best.pop();
+    }
+  }
+  return best.map((b) => ({ id: b.id, p: Math.exp(b.logit - max) / sum }));
+}
+
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+
+async function calculate() {
+  if (busy) return;
+  const sentence = $("sentence").value;
+  clearMessages();
+  if (sentence.trim() === "") { showNote("Type a sentence first."); return; }
+
+  setBusy(true);
+  setPipe(1);
+  heroTerrain.waving = true;
+  try {
+    await loadModel();
+  } catch (err) {
+    console.warn(err);
+    heroTerrain.waving = false;
+    setStatus("error", "Couldn't load the model");
+    hideModelResults();
+    const msg = String(err && err.message ? err.message : err);
+    const blocked = /failed to fetch|networkerror|load failed|content security|importing a module script failed|dynamically imported/i.test(msg);
+    const why = blocked || inFrame
+      ? "The model download was blocked. This happens when the page is opened inside a preview window (like Claude's file preview). Download index.html, then double-click it so it opens in Chrome or Edge, and click Calculate again."
+      : "The language model didn't load. Check your internet connection (it downloads from cdn.jsdelivr.net and huggingface.co), then click Calculate perplexity again.";
+    showError(why, String(err && err.message ? err.message : err));
+    setBusy(false);
+    return;
+  }
+
+  try {
+    setStatus("working", "Calculating…");
+
+    // 1-2. Token ids = [start marker] + the sentence's tokens
+    setPipe(2); await nextFrame();
+    const ids = [START_ID, ...tokenizer.encode(sentence)];
+    const n = ids.length;
+
+    // 3. Run the model ONCE on all ids
+    setPipe(3); await nextFrame();
+    const inputIds = new Tensor("int64", BigInt64Array.from(ids.map((x) => BigInt(x))), [1, n]);
+    const attentionMask = new Tensor("int64", new BigInt64Array(n).fill(1n), [1, n]);
+    const output = await model({ input_ids: inputIds, attention_mask: attentionMask });
+
+    // logits shape = [1, n, vocabulary], stored as one long flat array
+    const dims = output.logits.dims;
+    const vocab = dims[2];
+    const data = output.logits.data;
+    const rowAt = (pos) => data.subarray(pos * vocab, (pos + 1) * vocab);
+
+    // 4. P(token) = softmax of the logits at the position just BEFORE it
+    setPipe(4); await nextFrame();
+    const tokens = [];
+    for (let i = 1; i < n; i++) {
+      const logP = logProbAt(rowAt(i - 1), ids[i]);
+      tokens.push({ id: ids[i], label: tokenizer.decode([ids[i]]), p: Math.exp(logP) });
+    }
+    // Next-token guesses use the logits at the LAST position
+    const next = topK(rowAt(n - 1), TOP_K).map((t) => ({ ...t, label: tokenizer.decode([t.id]) }));
+
+    // Safety check: only ever show real probabilities
+    if (tokens.some((t) => !(t.p > 0 && t.p <= 1)) || next.some((t) => !(t.p >= 0 && t.p <= 1))) {
+      throw new Error("The model returned invalid numbers.");
+    }
+
+    // 5. Perplexity
+    const stats = computePerplexity(tokens);
+    lastResult = { sentence, ids, dims, tokens, next, stats };
+    setPipe(5);
+
+    heroTerrain.waving = false;
+    renderHero(lastResult);
+    renderPipeline(lastResult);
+    renderSection2(lastResult);
+    renderSection3(lastResult);
+    addToRanking(sentence, stats.perplexity, stats.N);
+    setStatus("ready", "Model ready");
+  } catch (err) {
+    console.warn(err);
+    heroTerrain.waving = false;
+    setStatus("error", "The model hit an error");
+    hideModelResults();
+    showError("The model couldn't process this sentence.", String(err && err.message ? err.message : err));
+  } finally {
+    heroTerrain.waving = false;
+    setBusy(false);
+  }
+}
+
+
+/* =====================================================================
+   SHOWING REAL RESULTS
+   ===================================================================== */
+function renderHero(result) {
+  $("stage-hint").hidden = true;
+  $("stage-key").hidden = false;
+  heroTerrain.setData(result.tokens, result.stats, true);
+}
+
+// Fill the "How the number is made" boxes with this run's real values
+function renderPipeline(result) {
+  const shownIds = result.ids.slice(0, 10).join(", ") + (result.ids.length > 10 ? ", …" : "");
+  const lastTok = result.tokens[result.tokens.length - 1];
+  $("v1").textContent = `“${result.sentence}”`;
+  $("v2").textContent = `[${shownIds}]  ${result.tokens.length} token${result.tokens.length === 1 ? "" : "s"}`;
+  $("v3").textContent = `logits shape [${result.dims.join(", ")}]`;
+  $("v4").textContent = `P(${visible(lastTok.label)}) = ${lastTok.p.toPrecision(3)}`;
+  $("v5").textContent = `perplexity = ${fmtPPL(result.stats.perplexity)}`;
+}
+
+function renderSection2(result) {
+  renderAnalysis($("s2-analysis"), result.tokens, result.stats);
+  $("s2").hidden = false;
+}
+
+function renderSection3(result) {
+  const topP = result.next[0].p;
+  const covered = result.next.reduce((s, t) => s + t.p, 0);
+  $("origin").innerHTML = showToken(result.tokens[result.tokens.length - 1].label);
+
+  // Branches go from the left middle to the centre of each bar row (48px rows + 8px gap)
+  let paths = "";
+  result.next.forEach((t, i) => {
+    const y = i * 56 + 24;
+    const w = 1.5 + 13 * (t.p / topP);
+    paths += `<path d="M 6 220 C 100 220, 90 ${y}, 190 ${y}" stroke="${i === 0 ? "url(#topgrad)" : "rgba(167,139,250,.3)"}" stroke-width="${w.toFixed(2)}"/>`;
+  });
+  $("fan-svg").innerHTML = `
+    <defs><linearGradient id="topgrad" x1="0" x2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset=".5" stop-color="#a78bfa"/><stop offset="1" stop-color="#f472b6"/></linearGradient></defs>
+    ${paths}<circle cx="6" cy="220" r="6" fill="#fff"/>`;
+
+  $("bars").innerHTML = result.next.map((t, i) => `
+    <button class="brow ${i === 0 ? "top" : ""}" data-i="${i}" aria-label="Add ${escapeHTML(visible(t.label))} to the sentence">
+      <span class="bt">${showToken(t.label)}</span>
+      <span class="track"><span class="fill" data-w="${((t.p / topP) * 100).toFixed(2)}"></span></span>
+      <span class="pc">${pct(t.p)}</span>
+    </button>`).join("");
+  requestAnimationFrame(() => document.querySelectorAll("#bars .fill").forEach((el) => (el.style.width = el.dataset.w + "%")));
+
+  $("fan-note").textContent = `These 8 guesses hold ${pct(covered)} of the model's probability. Click one to add it to your sentence and calculate again. Keep clicking and the model writes with you.`;
+  $("s3").hidden = false;
+}
+
+$("bars").addEventListener("click", (e) => {
+  const btn = e.target.closest(".brow");
+  if (!btn || busy || !lastResult) return;
+  $("sentence").value = lastResult.sentence + lastResult.next[Number(btn.dataset.i)].label;
+  calculate();
+  $("s1").scrollIntoView({ behavior: "smooth" });
+});
+
+// Copy the results as text (handy for a report)
+$("copy").addEventListener("click", async () => {
+  if (!lastResult) return;
+  const r = lastResult;
+  const lines = [
+    `Sentence: ${r.sentence}`,
+    `Model: ${MODEL_ID} (q8)`,
+    "",
+    "#\tToken\tP\t1/P",
+    ...r.tokens.map((t, i) => `${i + 1}\t${visible(t.label)}\t${t.p.toPrecision(6)}\t${(1 / t.p).toPrecision(6)}`),
+    "",
+    `N = ${r.stats.N}`,
+    `Perplexity = ${fmtPPL(r.stats.perplexity)}`
+  ];
+  const btn = $("copy");
+  try {
+    await navigator.clipboard.writeText(lines.join("\n"));
+    btn.textContent = "Copied";
+  } catch (e) {
+    btn.textContent = "Copy blocked by the browser";
+  }
+  setTimeout(() => (btn.textContent = "Copy results"), 1800);
+});
+
+
+/* =====================================================================
+   TRY IT BY HAND (simulated, not from the model)
+   ===================================================================== */
+const PRESETS = {
+  python:   [["I", 0.5], [" love", 0.8], [" Python", 0.2]],
+  eighth:   Array.from({ length: 8 }, (_, i) => [`token ${i + 1}`, 0.125]),
+  surprise: [["The", 0.9], [" cat", 0.9], [" sat", 0.9], [" banana", 0.01]]
+};
+
+function loadPreset(name) {
+  manualRows = PRESETS[name].map(([label, p]) => ({ label, value: String(p) }));
+  renderRows();
+}
+
+// Draw the rows (only when rows are added/removed, so typing keeps focus)
+function renderRows() {
+  $("rows").innerHTML = manualRows.map((row, i) => `
+    <div class="row" data-i="${i}">
+      <span class="i">${i + 1}</span>
+      <input type="text" class="m-label" value="${escapeHTML(row.label)}" placeholder="token name" aria-label="Token ${i + 1} name">
+      <div class="drag" role="slider" tabindex="0" aria-label="Token ${i + 1} probability" aria-valuemin="0.001" aria-valuemax="1">
+        <div class="drag-fill"></div><div class="drag-cap"></div>
+      </div>
+      <input type="number" class="m-p" value="${escapeHTML(row.value)}" min="0" max="1" step="any" aria-label="Token ${i + 1} probability">
+      <button class="remove">Remove</button>
+    </div>`).join("");
+  manualRows.forEach((_, i) => paintDrag(i));
+  updateManual();
+}
+
+function validP(value) {          // 0 < P ≤ 1
+  const p = Number(value);
+  return String(value).trim() !== "" && isFinite(p) && p > 0 && p <= 1;
+}
+
+function paintDrag(i) {
+  const rowEl = document.querySelector(`.row[data-i="${i}"]`);
+  if (!rowEl) return;
+  const ok = validP(manualRows[i].value);
+  const v = ok ? Number(manualRows[i].value) : 0;
+  const drag = rowEl.querySelector(".drag");
+  drag.style.setProperty("--c", ok ? surpriseColor(v) : "#3a3d5c");
+  rowEl.querySelector(".drag-fill").style.width = v * 100 + "%";
+  rowEl.querySelector(".drag-cap").style.left = v * 100 + "%";
+  drag.setAttribute("aria-valuenow", v);
+}
+
+function updateManual() {
+  const note = $("manual-note"), box = $("s4-analysis");
+  if (manualRows.length === 0) {
+    note.textContent = "Add at least one token."; note.hidden = false; box.innerHTML = "";
+    miniTerrain.clear();
+    return;
+  }
+  let allValid = true;
+  manualRows.forEach((row, i) => {
+    const ok = validP(row.value);
+    const el = document.querySelector(`.row[data-i="${i}"]`);
+    if (el) el.classList.toggle("bad", !ok);
+    if (!ok) allValid = false;
+  });
+  if (!allValid) {
+    note.textContent = "Every probability must be more than 0 and at most 1 (P = 0 would make 1/P infinite). Fix the highlighted rows.";
+    note.hidden = false; box.innerHTML = "";
+    return;
+  }
+  note.hidden = true;
+  const items = manualRows.map((row, i) => ({ label: row.label || `token ${i + 1}`, p: Number(row.value) }));
+  const stats = computePerplexity(items);
+  renderAnalysis(box, items, stats);
+  miniTerrain.setData(items, stats, false);
+}
+
+$("rows").addEventListener("input", (e) => {
+  const rowEl = e.target.closest(".row");
+  if (!rowEl) return;
+  const i = Number(rowEl.dataset.i);
+  if (e.target.classList.contains("m-label")) manualRows[i].label = e.target.value;
+  if (e.target.classList.contains("m-p")) { manualRows[i].value = e.target.value; paintDrag(i); }
+  updateManual();
+});
+
+$("rows").addEventListener("click", (e) => {
+  if (!e.target.classList.contains("remove")) return;
+  manualRows.splice(Number(e.target.closest(".row").dataset.i), 1);
+  renderRows();
+});
+
+// Drag a bar to set the probability (0.001 to 1)
+function setFromPointer(drag, clientX) {
+  const i = Number(drag.closest(".row").dataset.i);
+  const rect = drag.getBoundingClientRect();
+  const p = Math.round(Math.min(1, Math.max(0.001, (clientX - rect.left) / rect.width)) * 1000) / 1000;
+  manualRows[i].value = String(p);
+  drag.closest(".row").querySelector(".m-p").value = p;
+  paintDrag(i);
+  updateManual();
+}
+$("rows").addEventListener("pointerdown", (e) => {
+  const drag = e.target.closest(".drag");
+  if (!drag) return;
+  drag.setPointerCapture(e.pointerId);
+  setFromPointer(drag, e.clientX);
+  const move = (ev) => setFromPointer(drag, ev.clientX);
+  const up = () => { drag.removeEventListener("pointermove", move); drag.removeEventListener("pointerup", up); };
+  drag.addEventListener("pointermove", move);
+  drag.addEventListener("pointerup", up);
+});
+// Arrow keys move a focused bar by 0.01
+$("rows").addEventListener("keydown", (e) => {
+  const drag = e.target.closest(".drag");
+  if (!drag || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+  e.preventDefault();
+  const i = Number(drag.closest(".row").dataset.i);
+  const now = validP(manualRows[i].value) ? Number(manualRows[i].value) : 0.5;
+  const dir = e.key === "ArrowRight" || e.key === "ArrowUp" ? 1 : -1;
+  const p = Math.min(1, Math.max(0.001, Math.round((now + dir * 0.01) * 1000) / 1000));
+  manualRows[i].value = String(p);
+  drag.closest(".row").querySelector(".m-p").value = p;
+  paintDrag(i); updateManual();
+});
+
+$("add-row").addEventListener("click", () => {
+  manualRows.push({ label: `token ${manualRows.length + 1}`, value: "0.5" });
+  renderRows();
+  const labels = document.querySelectorAll(".m-label");
+  labels[labels.length - 1].focus();
+});
+document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => loadPreset(b.dataset.preset)));
+
+// Copy the model's real numbers into "Try it by hand"
+$("to-manual").addEventListener("click", () => {
+  if (!lastResult) return;
+  manualRows = lastResult.tokens.map((t) => ({ label: t.label, value: String(Number(t.p.toPrecision(6))) }));
+  renderRows();
+  $("s4").scrollIntoView({ behavior: "smooth" });
+});
+
+
+/* =====================================================================
+   RANKING
+   ===================================================================== */
+function addToRanking(sentence, ppl, N) {
+  ranking = ranking.filter((r) => r.sentence !== sentence);
+  ranking.push({ sentence, ppl, N });
+  if (ranking.length > 15) ranking.shift();
+  renderRanking();
+}
+function renderRanking() {
+  $("s5").hidden = ranking.length === 0;
+  if (!ranking.length) return;
+  const sorted = [...ranking].sort((a, b) => a.ppl - b.ppl);
+  const maxLog = Math.max(Math.log(2), ...sorted.map((r) => Math.log(r.ppl)));
+  $("rank").innerHTML = sorted.map((r, i) => `
+    <button class="rk" data-s="${escapeHTML(r.sentence)}" ${busy ? "disabled" : ""}>
+      <span class="n">${i + 1}</span>
+      <span class="s">${escapeHTML(r.sentence)}</span>
+      <span class="t"><span class="f" style="width:${Math.max(3, (Math.log(r.ppl) / maxLog) * 100)}%"></span></span>
+      <span class="v">${fmtPPL(r.ppl)}</span>
+    </button>`).join("");
+}
+$("rank").addEventListener("click", (e) => {
+  const btn = e.target.closest(".rk");
+  if (!btn || busy) return;
+  $("sentence").value = btn.dataset.s;
+  calculate();
+  $("s1").scrollIntoView({ behavior: "smooth" });
+});
+$("clear").addEventListener("click", () => { ranking = []; renderRanking(); });
+
+
+/* =====================================================================
+   START-UP
+   ===================================================================== */
+$("calc-btn").addEventListener("click", calculate);
+$("sentence").addEventListener("keydown", (e) => { if (e.key === "Enter") calculate(); });
+document.querySelectorAll(".sample").forEach((b) => b.addEventListener("click", () => {
+  if (busy) return;
+  $("sentence").value = b.textContent;
+  calculate();
+}));
+
+setStatus("idle", "Model not loaded yet. It downloads once, the first time you calculate.");
+if (inFrame) showNote("You're viewing this inside a preview window, which usually blocks the model download. For it to work, download index.html and open it directly in Chrome or Edge.");
+loadPreset("python");
+</script>
+</body>
+</html>
